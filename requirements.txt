@@ -1,1 +1,313 @@
 python-telegram-bot>=21,<22
+
+import os
+import random
+import sqlite3
+from telegram import Update
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler,
+    ContextTypes, filters
+)
+
+TOKEN = os.getenv("BOT_TOKEN", "8737249878:AAGyX3IVR3s6aglRD2GmY7s3sLdBfIuj_XU")
+OWNER_ID = int(os.getenv("OWNER_ID", "8709989912"))
+REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "")
+DB = "anime_cards.db"
+DROP_LIMIT = 100
+
+RARITIES = {
+    "Common": 35,
+    "Rare": 24,
+    "Epic": 16,
+    "Legendary": 10,
+    "Mythic": 7,
+    "Celestial": 4,
+    "Eternal": 2.5,
+    "Absolute": 1.5,
+}
+
+
+def connect():
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def setup():
+    with connect() as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS cards(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                rarity TEXT NOT NULL,
+                image_id TEXT NOT NULL
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS collection(
+                user_id INTEGER,
+                card_id INTEGER,
+                UNIQUE(user_id, card_id)
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS counters(
+                chat_id INTEGER PRIMARY KEY,
+                chars INTEGER DEFAULT 0
+            )
+        """)
+
+
+def is_owner(user):
+    return user is not None and user.id == OWNER_ID
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.effective_message.reply_text(
+        "🎴 ANIME CARD BOT\n\n"
+        "/catch ID - ကဒ်ဖမ်းရန်\n"
+        "/collection - ကိုယ့်ကဒ်များ\n"
+        "/cards - ကဒ်စာရင်း\n"
+        "/drop - Owner က ကဒ်ချရန်\n"
+        "/addcard - ကဒ်ပုံထည့်နည်း"
+    )
+
+
+async def send_drop(chat_id, context):
+    with connect() as con:
+        cards = con.execute("SELECT * FROM cards").fetchall()
+
+    if not cards:
+        await context.bot.send_message(
+            chat_id, "🎴 ကဒ်မရှိသေးပါ။ Owner က ပုံထည့်ပေးပါ။"
+        )
+        return
+
+    rarity = random.choices(
+        list(RARITIES.keys()),
+        weights=list(RARITIES.values()),
+        k=1
+    )[0]
+
+    pool = [c for c in cards if c["rarity"] == rarity]
+    card = random.choice(pool if pool else cards)
+
+    caption = (
+        "ᴀ ᴄʜᴀʀᴀᴄᴛᴇʀ ʜᴀs sᴘᴀᴡɴᴇᴅ ɪɴ ᴛʜᴇ ᴄʜᴀᴛ!\n\n"
+        f"🆔 Card ID: {card['id']}\n"
+        f"✨ Rarity: {card['rarity']}\n\n"
+        "ᴀᴅᴅ ᴛʜɪs ᴄʜᴀʀᴀᴄᴛᴇʀ ᴛᴏ ʏᴏᴜʀ ʜᴀʀᴇᴍ "
+        "ᴜsɪɴɢ /catch [ID]"
+    )
+
+    await context.bot.send_photo(
+        chat_id, card["image_id"], caption=caption
+    )
+
+
+async def drop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update.effective_user):
+        await update.effective_message.reply_text("Owner ပဲ သုံးနိုင်ပါတယ်။")
+        return
+    await send_drop(update.effective_chat.id, context)
+
+
+async def addcard_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update.effective_user):
+        return
+    await update.effective_message.reply_text(
+        "Bot Private Chat မှာ ပုံပို့ပြီး Caption ရေးပါ:\n"
+        "/addcard Blue Moon | Eternal\n\n"
+        "Rarity: Common, Rare, Epic, Legendary,\n"
+        "Mythic, Celestial, Eternal, Absolute"
+    )
+
+
+async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update.effective_user):
+        return
+    if update.effective_chat.type != "private":
+        return
+
+    caption = update.effective_message.caption or ""
+    if not caption.startswith("/addcard "):
+        await update.effective_message.reply_text(
+            "ပုံနဲ့အတူ Caption မှာ\n"
+            "/addcard Blue Moon | Eternal\n"
+            "လို့ရေးပေးပါ။"
+        )
+        return
+
+    try:
+        name, rarity = caption[len("/addcard "):].split("|", 1)
+        name = name.strip()
+        rarity = rarity.strip().title()
+
+        if not name or rarity not in RARITIES:
+            raise ValueError
+
+        image_id = update.effective_message.photo[-1].file_id
+
+        with connect() as con:
+            cur = con.execute(
+                "INSERT INTO cards(name,rarity,image_id) VALUES(?,?,?)",
+                (name, rarity, image_id)
+            )
+            card_id = cur.lastrowid
+
+        await update.effective_message.reply_text(
+            f"✅ ကဒ်ထည့်ပြီးပါပြီ!\n"
+            f"🆔 ID: {card_id}\n✨ Rarity: {rarity}"
+        )
+    except (ValueError, IndexError):
+        await update.effective_message.reply_text(
+            "ပုံစံမှားနေပါတယ်။\n"
+            "/addcard Blue Moon | Eternal"
+        )
+
+
+async def check_membership(update, context):
+    if not REQUIRED_CHANNEL:
+        return True
+    try:
+        member = await context.bot.get_chat_member(
+            REQUIRED_CHANNEL, update.effective_user.id
+        )
+        return member.status in ("member", "administrator", "creator")
+    except Exception:
+        return False
+
+
+async def catch_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_membership(update, context):
+        await update.effective_message.reply_text(
+            f"🔒 အရင်ဆုံး {REQUIRED_CHANNEL} ကို ဝင်ပါ။"
+        )
+        return
+
+    if not context.args or not context.args[0].isdigit():
+        await update.effective_message.reply_text("အသုံးပြုပုံ: /catch 12")
+        return
+
+    card_id = int(context.args[0])
+
+    with connect() as con:
+        card = con.execute(
+            "SELECT * FROM cards WHERE id=?", (card_id,)
+        ).fetchone()
+
+        if not card:
+            await update.effective_message.reply_text("ဒီကဒ် မရှိပါဘူး။")
+            return
+
+        try:
+            con.execute(
+                "INSERT INTO collection(user_id,card_id) VALUES(?,?)",
+                (update.effective_user.id, card_id)
+            )
+        except sqlite3.IntegrityError:
+            await update.effective_message.reply_text("ဒီကဒ်ကို ဖမ်းပြီးသားပါ။")
+            return
+
+    await update.effective_message.reply_text(
+        f"🎉 ကဒ်ဖမ်းမိပြီ!\nID: {card_id}\n"
+        f"✨ Rarity: {card['rarity']}"
+    )
+
+
+async def my_collection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with connect() as con:
+        rows = con.execute("""
+            SELECT cards.id, cards.rarity
+            FROM collection
+            JOIN cards ON cards.id=collection.card_id
+            WHERE collection.user_id=?
+            ORDER BY cards.id
+        """, (update.effective_user.id,)).fetchall()
+
+    if not rows:
+        await update.effective_message.reply_text("ကဒ်မရှိသေးပါဘူး။")
+        return
+
+    lines = ["🎴 MY COLLECTION"]
+    lines.extend(f"🆔 {r['id']} — {r['rarity']}" for r in rows)
+    await update.effective_message.reply_text("\n".join(lines))
+
+
+async def cards_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    with connect() as con:
+        rows = con.execute(
+            "SELECT id, rarity FROM cards ORDER BY id"
+        ).fetchall()
+
+    if not rows:
+        await update.effective_message.reply_text("ကဒ်မရှိသေးပါဘူး။")
+        return
+
+    await update.effective_message.reply_text(
+        "🎴 CARD LIST\n\n" + "\n".join(
+            f"🆔 {r['id']} — {r['rarity']}" for r in rows
+        )
+    )
+
+
+async def group_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message
+    chat = update.effective_chat
+    user = update.effective_user
+
+    if not msg or not chat or not user or user.is_bot:
+        return
+    if chat.type not in ("group", "supergroup"):
+        return
+
+    if is_owner(user) and msg.text and not msg.text.startswith("/"):
+        await send_drop(chat.id, context)
+        return
+
+    text_value = msg.text or msg.caption or ""
+    if not text_value:
+        return
+
+    with connect() as con:
+        row = con.execute(
+            "SELECT chars FROM counters WHERE chat_id=?", (chat.id,)
+        ).fetchone()
+
+        total = (row["chars"] if row else 0) + len(text_value)
+        drops, remainder = divmod(total, DROP_LIMIT)
+
+        con.execute("""
+            INSERT INTO counters(chat_id,chars) VALUES(?,?)
+            ON CONFLICT(chat_id)
+            DO UPDATE SET chars=excluded.chars
+        """, (chat.id, remainder))
+
+    for _ in range(min(drops, 3)):
+        await send_drop(chat.id, context)
+
+
+def main():
+    if TOKEN == "YOUR_BOT_TOKEN":
+        raise SystemExit("BOT_TOKEN ကို အရင်သတ်မှတ်ပါ။")
+
+    setup()
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("drop", drop_command))
+    app.add_handler(CommandHandler("addcard", addcard_help))
+    app.add_handler(CommandHandler("catch", catch_card))
+    app.add_handler(CommandHandler("collection", my_collection))
+    app.add_handler(CommandHandler("cards", cards_list))
+    app.add_handler(MessageHandler(filters.PHOTO, receive_photo))
+    app.add_handler(
+        MessageHandler(filters.ALL & ~filters.COMMAND, group_messages)
+    )
+
+    print("Anime Card Bot is running!")
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
