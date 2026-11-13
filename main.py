@@ -1,4 +1,4 @@
-import os
+
 import sqlite3
 import random
 
@@ -857,4 +857,36 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("balance", show_balance))
-    app.add_handler(CommandHandler("addcard", addcard_co
+    app.add_handler(CommandHandler("addcard", addcard_command))
+    app.add_handler(CommandHandler("drop", manual_drop))
+    app.add_handler(CommandHandler("catch", catch_card))
+    app.add_handler(CommandHandler("collection", collection))
+    app.add_handler(CommandHandler("w", card_search))
+    app.add_handler(CommandHandler("shop", shop))
+    app.add_handler(CommandHandler("buy", buy_card))
+    app.add_handler(CommandHandler("auction", auction))
+    app.add_handler(CommandHandler("auctions", auctions))
+    app.add_handler(CommandHandler("bid", bid))
+    app.add_handler(CommandHandler("closeauction", close_auction))
+
+    app.add_handler(
+        MessageHandler(
+            filters.Regex(r"(?i)^\.w(?:\s|$)"),
+            dot_search
+        )
+    )
+
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            group_messages
+        )
+    )
+
+    print("ANIME CARD BOT STARTED!")
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
+        
