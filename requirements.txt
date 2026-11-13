@@ -9,7 +9,7 @@ from telegram.ext import (
     ContextTypes, filters
 )
 
-TOKEN = os.getenv("BOT_TOKEN", "8737249878:AAGyX3IVR3s6aglRD2GmY7s3sLdBfIuj_XU")
+TOKEN = os.getenv("BOT_TOKEN", "")
 OWNER_ID = int(os.getenv("OWNER_ID", "8709989912"))
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "")
 DB = "anime_cards.db"
